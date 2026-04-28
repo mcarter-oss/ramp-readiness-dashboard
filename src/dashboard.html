@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ramp Readiness Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; padding: 20px; }
+    .container { max-width: 1400px; margin: 0 auto; }
+    h1 { color: #1a1a1a; margin-bottom: 30px; }
+    .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
+    .card { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .card h2 { font-size: 16px; color: #666; margin-bottom: 10px; }
+    .score { font-size: 48px; font-weight: bold; margin: 10px 0; }
+    .status-red { color: #dc2626; }
+    .status-yellow { color: #f59e0b; }
+    .status-green { color: #10b981; }
+    .rep-card { border-left: 4px solid #e5e7eb; }
+    .rep-card.red { border-left-color: #dc2626; }
+    .rep-card.yellow { border-left-color: #f59e0b; }
+    .rep-card.green { border-left-color: #10b981; }
+    .progress-bar { background: #e5e7eb; height: 8px; border-radius: 4px; overflow: hidden; margin: 10px 0; }
+    .progress-fill { height: 100%; background: #3b82f6; transition: width 0.3s; }
+    .alert { background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 12px; margin: 8px 0; }
+    .alert.medium { background: #fffbeb; border-color: #fde68a; }
+    .alert.low { background: #f0f9ff; border-color: #bae6fd; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+    .badge.red { background: #fee2e2; color: #dc2626; }
+    .badge.yellow { background: #fef3c7; color: #f59e0b; }
+    .badge.green { background: #d1fae5; color: #10b981; }
+    button { background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    button:hover { background: #2563eb; }
+    select { padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+    .filters { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 Ramp Readiness Dashboard</h1>
+
+    <div class="filters">
+      <label>Manager: <select id="managerFilter"><option value="">All Managers</option></select></label>
+      <label>Status: <select id="statusFilter">
+        <option value="">All</option>
+        <option value="red">Red</option>
+        <option value="yellow">Yellow</option>
+        <option value="green">Green</option>
+      </select></label>
+      <button onclick="loadDashboard()">Refresh</button>
+    </div>
+
+    <div id="teamOverview" class="dashboard-grid"></div>
+
+    <h2 style="margin: 30px 0 20px 0;">Individual Rep Details</h2>
+    <div id="repDetails"></div>
+
+    <h2 style="margin: 30px 0 20px 0;">Alerts</h2>
+    <div id="alertsContainer"></div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin + '/api';
+
+    async function loadDashboard() {
+      const managerId = document.getElementById('managerFilter').value;
+      const statusFilter = document.getElementById('statusFilter').value;
+
+      const params = new URLSearchParams();
+      if (managerId) params.append('managerId', managerId);
+
+      const [teamData, alertsData] = await Promise.all([
+        fetch(`${API_BASE}/dashboard/team?${params}`).then(r => r.json()),
+        fetch(`${API_BASE}/alerts?${params}`).then(r => r.json())
+      ]);
+
+      renderTeamOverview(teamData);
+      renderAlerts(alertsData);
+
+      if (teamData.length > 0) {
+        const repId = teamData[0].rep.id;
+        await loadRepDetails(repId);
+      }
+    }
+
+    function renderTeamOverview(data) {
+      const container = document.getElementById('teamOverview');
+      const statusFilter = document.getElementById('statusFilter').value;
+      const filtered = statusFilter ? data.filter(d => d.status === statusFilter) : data;
+
+      container.innerHTML = filtered.map(entry => {
+        const rep = entry.rep;
+        const score = entry.currentScore;
+        const statusClass = entry.status;
+
+        return `
+          <div class="card rep-card ${statusClass}" onclick="loadRepDetails('${rep.id}')">
+            <h2>${rep.name}</h2>
+            <div class="score status-${statusClass}">${score ? score.overall_score + '%' : 'N/A'}</div>
+            <div class="badge ${statusClass}">${entry.status.toUpperCase()}</div>
+            <p style="margin-top: 10px; color: #666; font-size: 14px;">Month ${rep.current_month} • ${rep.territory || 'No territory'}</p>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function loadRepDetails(repId) {
+      const data = await fetch(`${API_BASE}/dashboard/rep/${repId}`).then(r => r.json());
+
+      const container = document.getElementById('repDetails');
+      const score = data.currentScore || {};
+      const statusClass = data.status;
+
+      container.innerHTML = `
+        <div class="card">
+          <h2>${data.rep.name} - Month ${data.rep.current_month}</h2>
+          <div class="score status-${statusClass}">${score.overallScore || 0}%</div>
+          <div class="badge ${statusClass}">${data.status.toUpperCase()}</div>
+
+          <div style="margin: 20px 0;">
+            <h3>Milestone Progress</h3>
+            <div class="progress-bar"><div class="progress-fill" style="width: ${data.milestoneProgress.percentage}%"></div></div>
+            <p>${data.milestoneProgress.completed}/${data.milestoneProgress.total} completed (${data.milestoneProgress.percentage}%)</p>
+          </div>
+
+          ${score.salesforceScore !== undefined ? `
+            <div style="margin: 15px 0;">
+              <strong>Salesforce Score:</strong> ${score.salesforceScore}%<br>
+              <strong>Certification Score:</strong> ${score.certificationScore}%<br>
+              <strong>Manager Score:</strong> ${score.managerScore}%
+            </div>
+          ` : ''}
+
+          ${data.alerts.length > 0 ? `
+            <div style="margin-top: 20px;">
+              <h3>Alerts</h3>
+              ${data.alerts.map((a: string) => `<div class="alert">${a}</div>`).join('')}
+            </div>
+          ` : ''}
+
+          ${data.recommendedActions.length > 0 ? `
+            <div style="margin-top: 20px;">
+              <h3>Recommended Actions</h3>
+              <ul>${data.recommendedActions.map((a: string) => `<li style="margin: 5px 0;">${a}</li>`).join('')}</ul>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    function renderAlerts(alerts) {
+      const container = document.getElementById('alertsContainer');
+      if (alerts.length === 0) {
+        container.innerHTML = '<p style="color: #666;">No alerts at this time.</p>';
+        return;
+      }
+
+      container.innerHTML = alerts.map((alert: any) => `
+        <div class="alert ${alert.severity}">
+          <strong>${alert.repName}</strong> - ${alert.type.replace(/_/g, ' ')}<br>
+          ${alert.message}<br>
+          <em style="color: #666;">Action: ${alert.recommendedAction}</em>
+        </div>
+      `).join('');
+    }
+
+    async function loadManagers() {
+      const reps = await fetch(`${API_BASE}/reps`).then(r => r.json());
+      const managers = [...new Set(reps.map((r: any) => r.manager_id).filter(Boolean))];
+      const select = document.getElementById('managerFilter') as HTMLSelectElement;
+      managers.forEach(m => {
+        const option = document.createElement('option');
+        option.value = m;
+        option.text = reps.find((r: any) => r.manager_id === m)?.manager_name || m;
+        select.add(option);
+      });
+    }
+
+    loadManagers();
+    loadDashboard();
+  </script>
+</body>
+</html>
