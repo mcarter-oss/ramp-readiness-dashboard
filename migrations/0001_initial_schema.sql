@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS salesforce_data (
   rep_id TEXT NOT NULL,
   month INTEGER NOT NULL,
   pipeline_value REAL DEFAULT 0,
+  pipeline_coverage REAL DEFAULT 0,
   closed_deals INTEGER DEFAULT 0,
   total_deal_value REAL DEFAULT 0,
   meddpicc_completion_rate REAL DEFAULT 0,

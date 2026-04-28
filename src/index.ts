@@ -153,16 +153,18 @@ app.get('/', async (c) => {
 
     function renderTeam(data) {
       const filter = document.getElementById('statusFilter').value;
-      const filtered = filter ? data.filter(d => d.status === filter) : data;
+      const filtered = filter ? data.filter((d: any) => d.status === filter) : data;
 
-      document.getElementById('teamOverview').innerHTML = filtered.map(e => {
-        const s = e.currentScore;
+      document.getElementById('teamOverview').innerHTML = filtered.map((e: any) => {
+        const rep = e.rep;
         const statusClass = e.status;
-        return '<div class="card rep-card ' + statusClass + '" onclick="loadRep(\\'' + e.rep.id + '\\')">' +
-          '<h2>' + e.rep.name + '</h2>' +
-          '<div class="score status-' + statusClass + '">' + (s ? s.overall_score + '%' : 'N/A') + '</div>' +
+        const certs = rep.certifications || {};
+        return '<div class="card rep-card ' + statusClass + '" onclick="loadRep(\\'' + rep.id + '\\')">' +
+          '<h2>' + rep.name + '</h2>' +
+          '<div class="score status-' + statusClass + '">' + (rep.ramp_score || 0) + '%</div>' +
           '<div class="badge ' + statusClass + '">' + e.status.toUpperCase() + '</div>' +
-          '<p style="margin-top:10px;color:#666;font-size:14px;">Month ' + e.rep.current_month + ' • ' + (e.rep.territory || 'No territory') + '</p>' +
+          '<p style="margin:10px 0;font-size:13px;">' + (rep.segment || 'Commercial') + ' • Month ' + rep.current_month + '</p>' +
+          '<p style="font-size:12px;color:#666;">Pipeline: ' + (rep.pipeline_coverage || 0) + 'x | MedDPICC: ' + (certs.meddpicc ? '✓' : '✗') + '</p>' +
           '</div>';
       }).join('');
     }
@@ -170,23 +172,24 @@ app.get('/', async (c) => {
     async function loadRep(id) {
       currentRepId = id;
       const d = await fetch(API + '/dashboard/rep/' + id).then(r => r.json());
-      const s = d.currentScore || {};
+
+      const certs = d.certifications || {};
+      const dealsList = (d.deals || []).map((deal: any) =>
+        '<li style="margin:5px 0;">' + deal.stage + ' - $' + deal.amount + ' (MEDDPICC: ' + deal.meddpicc_score + '%)</li>'
+      ).join('');
 
       document.getElementById('repDetails').innerHTML = '<div class="card">' +
-        '<h2>' + d.rep.name + ' - Month ' + d.rep.current_month + '</h2>' +
-        '<div class="score status-' + d.status + '">' + (s.overallScore || 0) + '%</div>' +
+        '<h2>' + d.name + ' - Month ' + d.current_month + ' (' + (d.segment || 'Commercial') + ')</h2>' +
+        '<div class="score status-' + d.status + '">' + (d.ramp_score || 0) + '%</div>' +
         '<div class="badge ' + d.status + '">' + d.status.toUpperCase() + '</div>' +
-        '<div style="margin:20px 0;"><h3>Ramp Score Breakdown</h3>' +
-        '<p><strong>Certifications (20%):</strong> ' + (s.certificationScore || 0) + '%</p>' +
-        '<p><strong>Pipeline Creation (25%):</strong> ' + Math.round((s.salesforceScore || 0) * 0.4) + '%</p>' +
-        '<p><strong>Deal Quality MEDDPICC (25%):</strong> ' + Math.round((s.salesforceScore || 0) * 0.3) + '%</p>' +
-        '<p><strong>Activity & Execution (15%):</strong> ' + Math.round((s.salesforceScore || 0) * 0.3) + '%</p>' +
-        '<p><strong>Manager Validation (15%):</strong> ' + (s.managerScore || 0) + '%</p>' +
+        '<div style="margin:20px 0;"><h3>Rep Details (Simple Structure Model)</h3>' +
+        '<p><strong>Pipeline Coverage:</strong> ' + (d.pipeline_coverage || 0) + 'x</p>' +
+        '<p><strong>Certifications:</strong> MEDDPICC: ' + (certs.meddpicc ? '✓' : '✗') +
+        ' | Demo Cert: ' + (certs.demoCert ? '✓' : '✗') +
+        ' | Role Play: ' + (certs.rolePlay ? '✓' : '✗') + '</p>' +
+        '<p><strong>Manager Approval:</strong> ' + (d.manager_approval ? '✓ TRUE' : '✗ FALSE') + '</p>' +
         '</div>' +
-        '<div class="progress-bar"><div class="progress-fill" style="width:' + d.milestoneProgress.percentage + '%"></div></div>' +
-        '<p>' + d.milestoneProgress.completed + '/' + d.milestoneProgress.total + ' milestones completed</p>' +
-        (d.alerts.length > 0 ? '<div style="margin-top:20px;"><h3>Alerts</h3>' + d.alerts.map(a => '<div class="alert">' + a + '</div>').join('') + '</div>' : '') +
-        (d.recommendedActions.length > 0 ? '<div style="margin-top:20px;"><h3>Recommended Actions</h3><ul>' + d.recommendedActions.map(a => '<li style="margin:5px 0;">' + a + '</li>').join('') + '</ul></div>' : '') +
+        (d.deals && d.deals.length > 0 ? '<div style="margin-top:20px;"><h3>Deals</h3><ul>' + dealsList + '</ul></div>' : '') +
         '</div>';
     }
 
@@ -310,47 +313,124 @@ app.post('/api/reps/:repId/manager-inputs', async (c) => {
   return c.json({ id, ...input }, 201);
 });
 
-// Dashboard summary
+// Dashboard summary with Simple Structure Model
 app.get('/api/dashboard/rep/:repId', async (c) => {
   const db = c.env.DB;
   const repId = c.req.param('repId');
+
   const rep = await db.prepare('SELECT * FROM reps WHERE id = ?').bind(repId).first() as any;
   if (!rep) return c.json({ error: 'Rep not found' }, 404);
 
-  const milestones = await db.prepare(`SELECT rm.*, m.month, m.name, m.category, m.weight, m.target_value FROM rep_milestones rm JOIN milestones m ON rm.milestone_id = m.id WHERE rm.rep_id = ?`).bind(repId).all() as any;
+  const milestones = await db.prepare(`
+    SELECT rm.*, m.month, m.name, m.category, m.weight, m.target_value
+    FROM rep_milestones rm
+    JOIN milestones m ON rm.milestone_id = m.id
+    WHERE rm.rep_id = ?
+  `).bind(repId).all() as any;
+
   const salesforceData = await getSalesforceData(db, repId);
   const certifications = await db.prepare('SELECT * FROM certifications WHERE rep_id = ?').bind(repId).all() as any;
   const managerInputs = await db.prepare('SELECT * FROM manager_inputs WHERE rep_id = ?').bind(repId).all() as any;
 
-  const score = calculateReadinessScore(rep, milestones.results || [], salesforceData, certifications.results || [], managerInputs.results || []);
+  const score = calculateReadinessScore(
+    rep,
+    milestones.results || [],
+    salesforceData,
+    certifications.results || [],
+    managerInputs.results || []
+  );
 
-  await db.prepare(`INSERT INTO readiness_scores (id, rep_id, month, overall_score, salesforce_score, certification_score, manager_score, status, alerts, recommended_actions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(score.id, score.repId, score.month, score.overallScore, score.salesforceScore, score.certificationScore, score.managerScore, score.status, JSON.stringify(score.alerts), JSON.stringify(score.recommendedActions)).run();
+  await db.prepare(`
+    INSERT INTO readiness_scores (id, rep_id, month, overall_score, salesforce_score, certification_score, manager_score, status, alerts, recommended_actions)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    score.id, score.repId, score.month, score.overallScore, score.salesforceScore,
+    score.certificationScore, score.managerScore, score.status,
+    JSON.stringify(score.alerts), JSON.stringify(score.recommendedActions)
+  ).run();
 
-  const completedMilestones = (milestones.results || []).filter((m: any) => m.status === 'completed').length;
-  const totalMilestones = (milestones.results || []).filter((m: any) => (m.month || 1) <= rep.current_month).length;
+  // Build Simple Structure Model response
+  const latestSFData = salesforceData.find((d: any) => d.month === rep.current_month);
+  const deals = latestSFData?.raw_data ? JSON.parse(latestSFData.raw_data).deals || [] : [];
 
-  return c.json({
-    rep, currentScore: score,
-    milestoneProgress: { completed: completedMilestones, total: totalMilestones, percentage: totalMilestones > 0 ? Math.round((completedMilestones / totalMilestones) * 100) : 0 },
-    status: score.status, alerts: score.alerts, recommendedActions: score.recommendedActions
-  });
+  const repResponse = {
+    name: rep.name,
+    segment: rep.segment || 'Commercial',
+    start_date: rep.start_date,
+    current_month: rep.current_month,
+    ramp_score: score.overallScore,
+    status: score.status,
+    pipeline_coverage: latestSFData?.pipeline_coverage || 0,
+    certifications: {
+      meddpicc: certifications.results?.some((c: any) => c.name.includes('MEDDPICC') && c.status === 'earned') || false,
+      demo_cert: certifications.results?.some((c: any) => c.name.includes('Demo') && c.status === 'earned') || false,
+      role_play: certifications.results?.some((c: any) => c.name.includes('Role Play') && c.status === 'earned') || false
+    },
+    deals: deals,
+    manager_approval: managerInputs.results?.some((i: any) => i.input_type === 'approval' && i.status === 'approved') || false
+  };
+
+  return c.json(repResponse);
+});
 });
 
-// Team dashboard
+// Team dashboard with Simple Structure Model
 app.get('/api/dashboard/team', async (c) => {
   const db = c.env.DB;
   const managerId = c.req.query('managerId');
+
   let query = 'SELECT * FROM reps';
   const params: any[] = [];
   if (managerId) { query += ' WHERE manager_id = ?'; params.push(managerId); }
+
   const repsResult = await db.prepare(query).bind(...params).all();
   const reps = repsResult.results || [];
+
   const summaries = [];
   for (const rep of reps) {
-    const scoreResult = await db.prepare(`SELECT * FROM readiness_scores WHERE rep_id = ? ORDER BY computed_at DESC LIMIT 1`).bind((rep as any).id).first();
-    summaries.push({ rep, currentScore: scoreResult || null, status: (scoreResult as any)?.status || 'red' });
+    const repData = rep as any;
+
+    // Get latest readiness score
+    const scoreResult = await db.prepare(`
+      SELECT * FROM readiness_scores WHERE rep_id = ? ORDER BY computed_at DESC LIMIT 1
+    `).bind(repData.id).first();
+
+    // Get latest Salesforce data
+    const sfData = await db.prepare(`
+      SELECT * FROM salesforce_data WHERE rep_id = ? ORDER BY month DESC LIMIT 1
+    `).bind(repData.id).first() as any;
+
+    // Get certifications
+    const certs = await db.prepare('SELECT * FROM certifications WHERE rep_id = ?').bind(repData.id).all() as any;
+
+    // Get manager inputs
+    const managerInputs = await db.prepare('SELECT * FROM manager_inputs WHERE rep_id = ?').bind(repData.id).all() as any;
+
+    // Build Simple Structure Model for each rep
+    const deals = sfData?.raw_data ? JSON.parse(sfData.raw_data).deals || [] : [];
+
+    summaries.push({
+      rep: {
+        name: repData.name,
+        segment: repData.segment || 'Commercial',
+        start_date: repData.start_date,
+        current_month: repData.current_month,
+        ramp_score: (scoreResult as any)?.overall_score || 0,
+        status: (scoreResult as any)?.status || 'red',
+        pipeline_coverage: sfData?.pipeline_coverage || 0,
+        certifications: {
+          meddpicc: certs.results?.some((c: any) => c.name.includes('MEDDPICC') && c.status === 'earned') || false,
+          demoCert: certs.results?.some((c: any) => c.name.includes('Demo') && c.status === 'earned') || false,
+          rolePlay: certs.results?.some((c: any) => c.name.includes('Role Play') && c.status === 'earned') || false
+        },
+        deals: deals,
+        manager_approval: managerInputs.results?.some((i: any) => i.input_type === 'approval' && i.status === 'approved') || false
+      },
+      currentScore: scoreResult || null,
+      status: (scoreResult as any)?.status || 'red'
+    });
   }
+
   return c.json(summaries);
 });
 

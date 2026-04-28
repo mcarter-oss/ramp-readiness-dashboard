@@ -2,13 +2,32 @@ export interface Rep {
   id: string;
   name: string;
   email: string;
+  segment?: string;
   startDate: string;
+  currentMonth: number;
+  rampScore?: number;
+  status?: 'red' | 'yellow' | 'green';
+  pipelineCoverage?: number;
+  certifications?: {
+    meddpicc: boolean;
+    demoCert: boolean;
+    rolePlay: boolean;
+  };
+  deals?: Deal[];
+  managerApproval?: boolean;
   territory?: string;
   managerId?: string;
   managerName?: string;
-  currentMonth: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Deal {
+  id: string;
+  stage: string;
+  amount: number;
+  meddpiccScore: number;
+  lastActivityDate: string;
 }
 
 export interface Milestone {
@@ -38,10 +57,12 @@ export interface SalesforceData {
   repId: string;
   month: number;
   pipelineValue: number;
+  pipelineCoverage?: number;
   closedDeals: number;
   totalDealValue: number;
   meddpiccCompletionRate: number;
   activityScore: number;
+  deals?: Deal[];
   rawData?: any;
   syncedAt: string;
 }
