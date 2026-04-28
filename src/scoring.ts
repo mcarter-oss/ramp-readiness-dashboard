@@ -8,17 +8,18 @@ export function calculateReadinessScore(
   managerInputs: ManagerInput[]
 ): ReadinessScore {
   const currentMonth = rep.currentMonth;
-  const monthKey = `M${currentMonth}`;
 
   const alerts: string[] = [];
   const recommendedActions: string[] = [];
 
-  const salesforceScore = calculateSalesforceScore(rep, salesforceData, currentMonth, alerts, recommendedActions);
   const certificationScore = calculateCertificationScore(certifications, currentMonth, alerts, recommendedActions);
-  const managerScore = calculateManagerScore(managerInputs, currentMonth, alerts, recommendedActions);
-  const milestoneScore = calculateMilestoneScore(milestones, currentMonth, alerts, recommendedActions);
+  const pipelineScore = calculatePipelineScore(rep, salesforceData, currentMonth, alerts, recommendedActions);
+  const dealQualityScore = calculateDealQualityScore(rep, salesforceData, currentMonth, alerts, recommendedActions);
+  const activityScore = calculateActivityScore(rep, salesforceData, currentMonth, alerts, recommendedActions);
+  const managerValidationScore = calculateManagerValidationScore(managerInputs, currentMonth, alerts, recommendedActions);
 
-  const overallScore = (salesforceScore * 0.35 + certificationScore * 0.25 + managerScore * 0.20 + milestoneScore * 0.20);
+  // Weighted: Certifications 20%, Pipeline 25%, Deal Quality 25%, Activity 15%, Manager 15%
+  const overallScore = (certificationScore * 0.20 + pipelineScore * 0.25 + dealQualityScore * 0.25 + activityScore * 0.15 + managerValidationScore * 0.15);
 
   let status: 'red' | 'yellow' | 'green';
   if (overallScore >= 80) {
@@ -34,9 +35,9 @@ export function calculateReadinessScore(
     repId: rep.id,
     month: currentMonth,
     overallScore: Math.round(overallScore * 10) / 10,
-    salesforceScore,
+    salesforceScore: Math.round((pipelineScore * 0.625 + dealQualityScore * 0.625 + activityScore * 0.75) * 10) / 10,
     certificationScore,
-    managerScore,
+    managerScore: managerValidationScore,
     status,
     alerts,
     recommendedActions,
@@ -44,7 +45,7 @@ export function calculateReadinessScore(
   };
 }
 
-function calculateSalesforceScore(
+function calculatePipelineScore(
   rep: Rep,
   salesforceData: SalesforceData[],
   month: number,
@@ -57,6 +58,75 @@ function calculateSalesforceScore(
     recommendedActions.push('Sync Salesforce data for current month');
     return 0;
   }
+
+  const pipelineTargets: Record<number, number> = { 1: 0, 2: 50000, 3: 150000, 4: 300000, 5: 500000, 6: 750000 };
+  const pipelineTarget = pipelineTargets[month] || 750000;
+  const pipelineScore = Math.min(100, (monthData.pipelineValue / pipelineTarget) * 100);
+
+  if (monthData.pipelineValue < pipelineTarget * 0.5) {
+    alerts.push(`Pipeline value ($${monthData.pipelineValue}) is below 50% of target ($${pipelineTarget})`);
+    recommendedActions.push('Focus on prospecting and building pipeline');
+  }
+
+  return Math.round(pipelineScore * 10) / 10;
+}
+
+function calculateDealQualityScore(
+  rep: Rep,
+  salesforceData: SalesforceData[],
+  month: number,
+  alerts: string[],
+  recommendedActions: string[]
+): number {
+  const monthData = salesforceData.find(d => d.month === month);
+  if (!monthData) return 0;
+
+  const meddpiccScore = monthData.meddpiccCompletionRate || 0;
+
+  if (meddpiccScore < 60) {
+    alerts.push('MEDDPICC completion rate is below 60%');
+    recommendedActions.push('Complete MEDDPICC training and apply to active deals');
+  }
+
+  return Math.round(meddpiccScore * 10) / 10;
+}
+
+function calculateActivityScore(
+  rep: Rep,
+  salesforceData: SalesforceData[],
+  month: number,
+  alerts: string[],
+  recommendedActions: string[]
+): number {
+  const monthData = salesforceData.find(d => d.month === month);
+  if (!monthData) return 0;
+
+  return Math.round((monthData.activityScore || 0) * 10) / 10;
+}
+
+function calculateManagerValidationScore(
+  managerInputs: ManagerInput[],
+  month: number,
+  alerts: string[],
+  recommendedActions: string[]
+): number {
+  if (managerInputs.length === 0) {
+    alerts.push('No manager inputs recorded');
+    recommendedActions.push('Schedule 1:1 with manager for progress review');
+    return 0;
+  }
+
+  const approved = managerInputs.filter(i => i.status === 'approved').length;
+  const score = (approved / managerInputs.length) * 100;
+
+  const pending = managerInputs.filter(i => i.status === 'pending');
+  if (pending.length > 0) {
+    alerts.push(`${pending.length} manager approvals still pending`);
+    recommendedActions.push('Follow up with manager on pending approvals');
+  }
+
+  return Math.round(score * 10) / 10;
+}
 
   let score = 0;
 
