@@ -21,13 +21,16 @@ export function calculateReadinessScore(
   // Weighted: Certifications 20%, Pipeline 25%, Deal Quality 25%, Activity 15%, Manager 15%
   const overallScore = (certificationScore * 0.20 + pipelineScore * 0.25 + dealQualityScore * 0.25 + activityScore * 0.15 + managerValidationScore * 0.15);
 
+  // Apply month-based milestone status logic
+  const monthStatus = calculateMonthStatus(milestones, currentMonth);
+
   let status: 'red' | 'yellow' | 'green';
-  if (overallScore >= 80) {
+  if (monthStatus === 'green' && overallScore >= 80) {
     status = 'green';
-  } else if (overallScore >= 60) {
-    status = 'yellow';
-  } else {
+  } else if (monthStatus === 'red' || overallScore < 60) {
     status = 'red';
+  } else {
+    status = 'yellow';
   }
 
   return {
@@ -102,6 +105,26 @@ function calculateActivityScore(
   if (!monthData) return 0;
 
   return Math.round((monthData.activityScore || 0) * 10) / 10;
+}
+
+function calculateMonthStatus(
+  milestones: RepMilestone[],
+  month: number
+): 'red' | 'yellow' | 'green' {
+  const monthMilestones = milestones.filter(m => {
+    const milestoneMonth = m.milestone?.month || 1;
+    return milestoneMonth === month;
+  });
+
+  if (monthMilestones.length === 0) return 'red';
+
+  const completed = monthMilestones.filter(m => m.status === 'completed').length;
+  const missing = monthMilestones.length - completed;
+
+  // Status Logic: Green = all complete, Yellow = 1 missing, Red = 2+ missing
+  if (missing === 0) return 'green';
+  if (missing === 1) return 'yellow';
+  return 'red';
 }
 
 function calculateManagerValidationScore(
